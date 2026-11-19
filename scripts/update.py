@@ -332,6 +332,8 @@ def run_update():
             added.append(date)
             print(f"{date}：新增 {', '.join(f'{m}({len(t)})' for m, t in sorted(contracts.items()))}")
     latest = max(x["date"] for x in load("index.json"))
+    if added:
+        dump("updated.json", {"dataDate": latest, "updatedAt": dt.datetime.now(TPE).strftime("%Y-%m-%dT%H:%M:%S+08:00")})
     print(f"完成。新增 {len(added)} 天；目前最新資料日：{latest}")
     return added
 

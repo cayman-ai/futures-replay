@@ -2,9 +2,8 @@ name: 每日更新期貨資料並發布
 
 on:
   schedule:
-    # 台北時間週一～五 16:17、18:47、21:23（UTC+8）；期交所公布時間不固定，跑三次確保補到
+    # 台北時間週一～五 16:17（主要）、21:23（備援）；漏跑的日期下次會自動補齊
     - cron: "17 8 * * 1-5"
-    - cron: "47 10 * * 1-5"
     - cron: "23 13 * * 1-5"
   workflow_dispatch:
     inputs:
@@ -28,6 +27,8 @@ jobs:
   update:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      changed: ${{ steps.save.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,13 +46,15 @@ jobs:
         run: python scripts/update.py
 
       - name: 資料存回 main
+        id: save
         shell: bash
         run: |
           set -euo pipefail
           git config user.name futures-replay-bot
           git config user.email bot@users.noreply.github.com
           git add site/data
-          if git diff --cached --quiet; then echo "沒有新資料"; exit 0; fi
+          if git diff --cached --quiet; then echo "沒有新資料"; echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
           latest=$(python -c "import json;print(max(x['date'] for x in json.load(open('site/data/index.json'))))")
           git commit -qm "資料更新至 ${latest}"
           for i in 1 2 3 4 5; do
@@ -62,6 +65,8 @@ jobs:
 
   deploy:
     needs: update
+    # 排程跑且沒有新資料就不重新發布；手動或程式改動時照常發布
+    if: needs.update.outputs.changed == 'true' || github.event_name != 'schedule'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
