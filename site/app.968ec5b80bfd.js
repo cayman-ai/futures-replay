@@ -1,12 +1,12 @@
 import {saveChartImage} from './save-chart.f27259f3bc1f.js';
 import {entryTimeAnalysis,entryTimeHTML} from './entry-times.720aeb46f52c.js';
-import {statisticsHTML} from './statistics.68fb18452f33.js';
+import {statisticsHTML} from './statistics.e053639dedbd.js';
 import {ALERT_DEFAULTS,normalizeAlerts,AlertTicker} from './alert-settings.27f735030521.js';
 import {aggregateHistory,historySummaryHTML} from './history-summary.635e8e4e91d8.js';
 import {DatePicker} from './date-picker.e735cace8802.js';
 import {performanceHTML,SessionArchive} from './performance.ec799079fbde.js';
 import {LightningPanel} from './lightning.bc778724d23d.js';
-import {setupLayout} from './layout.d3edd6acc1d6.js';
+import {setupLayout} from './layout.515cbdfe5fdb.js';
 import {Alerts} from './alerts.9ecb4dc4540f.js';
 setupLayout();
 const datePicker=new DatePicker(document.getElementById('date'));
