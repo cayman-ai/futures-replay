@@ -299,6 +299,19 @@ def check_official(idx, stats, ticks_by):
         mism.append({"date": d["date"], "site": mine, "official": [o["open"], o["high"], o["low"], o["close"]],
                      "officialContract": d.get("contract") or months[0], "file": d.get("file"),
                      "ampSite": d["amplitude"], "ampOfficial": o["high"] - o["low"]})
+    # 換月日的昨高昨低（同一契約前一交易日）
+    sd = sorted(by_date)
+    roll_bad = []
+    rolls = [d for d in daily if "prevHigh" in d]
+    for d in rolls:
+        pdx = sd.index(d["date"]) - 1
+        o = by_date[sd[pdx]].get(d["contract"]) if pdx >= 0 else None
+        if not o or [o["high"], o["low"]] != [d["prevHigh"], d["prevLow"]]:
+            roll_bad.append(d["date"])
+    if roll_bad:
+        bad("C", f"換月日昨高昨低與官方不同：{roll_bad}")
+    else:
+        notes["C"].append(f"換月日 {len(rolls)} 天的昨高昨低（同一契約前一交易日日盤）全部與官方相同")
     notes["C"].append(f"日線與官方完全相同：{sum(pick_counts.values())} 天（{dict(pick_counts)}）")
     if mism:
         bad("C", f"日線開高低收與官方不同：{len(mism)} 天（明細見 verify.json）")
