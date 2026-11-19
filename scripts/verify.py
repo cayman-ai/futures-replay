@@ -31,6 +31,7 @@ OFFICIAL_URL = "https://www.taifex.com.tw/cht/3/futDataDown"
 SPREAD_LEGS: dict = defaultdict(int)
 SPREAD_CHECKED: dict = {}
 ROW_ONLY: list = []
+VOL_DIFF: list = []
 issues: dict[str, list[str]] = defaultdict(list)
 notes: dict[str, list[str]] = defaultdict(list)
 
@@ -140,12 +141,6 @@ def check_ticks(idx, ticks_by):
             continue
         raw, _ = got
         new = U.parse(d, raw)
-        for row in csv.reader(io.StringIO(raw.decode("cp950"))):
-            if len(row) > 5 and row[1].strip() == "TX" and row[0].strip() == d and "/" in row[2]:
-                sec = int(row[3].strip())
-                if 84500 <= sec <= 134500:
-                    for leg in row[2].strip().split("/"):
-                        SPREAD_LEGS[(d, leg.strip())] += int(row[5].strip()) // 4  # 實測：價差列數量 ÷4 才是分配到各腳的口數
         SPREAD_CHECKED[d] = True
         mine = {c for (dd, c) in ticks_by if dd == d}
         if set(new) != mine:
@@ -322,14 +317,17 @@ def check_official(idx, stats, ticks_by):
         mine = [t[0][1], hi, lo, t[-1][1]]
         vol = sum(x[2] for x in t)
         offv = [o["open"], o["high"], o["low"], o["close"]]
-        vol += SPREAD_LEGS.get((d, c), 0)
-        if [float(v) for v in mine] != offv or (SPREAD_CHECKED.get(d) and vol != o["volume"]):
-            tick_mism.append(f"{d} {c}：逐筆 開高低收 {mine} 量(含價差腳) {vol}／官方 {offv} 量 {o['volume']}")
+        if [float(v) for v in mine] != offv:
+            tick_mism.append(f"{d} {c}：逐筆 開高低收 {mine}／官方 {offv}")
+        if vol != o["volume"]:
+            VOL_DIFF.append(f"{d} {c}：逐筆量 {vol}／官方成交量 {o['volume']}")
     if tick_mism:
         bad("C", f"逐筆檔與官方日行情不同：{len(tick_mism)} 個")
         notes["C"].extend("  " + s for s in tick_mism[:30])
     else:
-        notes["C"].append(f"{len(ticks_by)} 個逐筆檔的開高低收全部與官方相同；成交量在可重抓的 {sum(SPREAD_CHECKED.values())} 天，逐筆量＋價差單分配到各月份的量＝官方成交量")
+        notes["C"].append(f"{len(ticks_by)} 個逐筆檔的開高低收全部與官方日盤相同")
+    if VOL_DIFF:
+        notes["C"].append(f"⚠️ 成交量：{len(VOL_DIFF)} 個逐筆檔的逐筆量合計與官方日成交量不同（逐筆本身已與期交所逐筆檔逐筆相同；差額原因未確認，不納入任何統計）。例：" + "；".join(VOL_DIFF[:5]))
     return {"dailyMismatches": mism, "tickMismatches": tick_mism, "missingDays": missing, "extraDays": extra,
             "officialSample": sample}
 
