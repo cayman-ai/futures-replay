@@ -1,0 +1,74 @@
+name: 每日更新期貨資料並發布
+
+on:
+  schedule:
+    # 台北時間週一～五 16:17、18:47、21:23（UTC+8）；期交所公布時間不固定，跑三次確保補到
+    - cron: "17 8 * * 1-5"
+    - cron: "47 10 * * 1-5"
+    - cron: "23 13 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      check:
+        description: "（選填）重新下載某日 YYYYMMDD 並與現有資料比對"
+        required: false
+  push:
+    branches: [main]
+    paths: ["site/**", "scripts/**", ".github/workflows/**"]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: futures-replay-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: 比對轉換邏輯（手動指定日期時）
+        if: github.event_name == 'workflow_dispatch' && inputs.check != ''
+        run: python scripts/update.py --check "${{ inputs.check }}"
+
+      - name: 比對轉換邏輯（程式有改動時，用最新一天驗證）
+        if: github.event_name == 'push'
+        run: python scripts/update.py --check "$(python -c "import json;print(max(x['date'] for x in json.load(open('site/data/index.json'))))")"
+
+      - name: 補齊缺的交易日（失敗就停，不提交）
+        run: python scripts/update.py
+
+      - name: 資料存回 main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add site/data
+          if git diff --cached --quiet; then echo "沒有新資料"; exit 0; fi
+          latest=$(python -c "import json;print(max(x['date'] for x in json.load(open('site/data/index.json'))))")
+          git -c user.name=futures-replay-bot -c user.email=bot@users.noreply.github.com commit -qm "資料更新至 ${latest}"
+          for i in 1 2 3 4 5; do
+            if git pull -q --rebase origin main && git push -q origin HEAD:main; then exit 0; fi
+            sleep $((i*7))
+          done
+          echo "::error::推送失敗"; exit 1
+
+  deploy:
+    needs: update
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: site }
+      - id: deployment
+        uses: actions/deploy-pages@v4
