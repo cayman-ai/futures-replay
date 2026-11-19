@@ -137,6 +137,12 @@ def contract_files(date, contracts, sha, url, index):
     return entries, files
 
 
+def pick_front(contracts):
+    """最近月份契約；結算日近月 13:30 就收盤，改用下一個交易到 13:45 的契約（與 Dropbox 逐日 Excel 一致）。"""
+    full = [m for m in sorted(contracts) if contracts[m][-1][0] > 13 * 3600 + 30 * 60]
+    return full[0] if full else min(contracts)
+
+
 def extremes_of(ticks):
     hi = max(t[1] for t in ticks)
     lo = min(t[1] for t in ticks)
@@ -148,7 +154,7 @@ def add_day(date, contracts, sha, url, fetched_at):
     if any(x["date"] == date for x in index):
         return False
     entries, files = contract_files(date, contracts, sha, url, index)
-    front = min(contracts)  # 最近月份
+    front = pick_front(contracts)
     ticks = contracts[front]
     if len(ticks) < 1000:
         raise RuntimeError(f"{date} 近月 {front} 只有 {len(ticks)} 筆，疑似資料不完整")
