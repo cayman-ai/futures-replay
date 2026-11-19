@@ -1,0 +1,39 @@
+name: 資料全面檢查
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["scripts/verify.py", ".github/workflows/verify.yml"]
+  schedule:
+    - cron: "41 14 * * 5"   # 每週五台北 22:41
+
+permissions:
+  contents: write
+
+concurrency:
+  group: futures-replay-update
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: python scripts/verify.py
+      - name: 報告存回 main（只寫 reports/）
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat reports/verify.md >> "$GITHUB_STEP_SUMMARY"
+          git add reports
+          git diff --cached --quiet && exit 0
+          git -c user.name=futures-replay-bot -c user.email=bot@users.noreply.github.com commit -qm "資料檢查報告 $(TZ=Asia/Taipei date '+%F %H:%M')"
+          for i in 1 2 3 4 5; do
+            if git pull -q --rebase origin main && git push -q origin HEAD:main; then exit 0; fi
+            sleep $((i*7))
+          done
+          exit 1
