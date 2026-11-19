@@ -161,7 +161,16 @@ def add_day(date, contracts, sha, url, fetched_at):
     hi, lo, hit, lot = extremes_of(ticks)
 
     stats = load("statistics.json")
-    stats["daily"].append({
+    roll = {}
+    last = stats["daily"][-1]
+    if last.get("contract") != front:
+        prev_date = max((x["date"] for x in index if x["date"] < date), default=None)
+        pf = load(f"{prev_date}_{front}.json") if prev_date else None
+        if pf and pf["ticks"]:
+            roll = {"prevHigh": float(max(t[1] for t in pf["ticks"])), "prevLow": float(min(t[1] for t in pf["ticks"]))}
+        else:
+            roll = {"prevHigh": None, "prevLow": None}
+    stats["daily"].append({**roll,
         "date": date, "contract": front, "open": float(ticks[0][1]), "high": float(hi),
         "low": float(lo), "close": float(ticks[-1][1]), "amplitude": float(hi - lo),
         "highTime": hit - hit % 60, "lowTime": lot - lot % 60,
@@ -264,17 +273,22 @@ def previous_range(daily, old):
         if d["date"] <= start_s:
             continue
         first = first or d["date"]
-        if any(d.get(k) is None for k in ("open", "high", "low")) or prev.get("high") is None or prev.get("low") is None:
+        # 昨高昨低一律取「同一個契約」前一交易日的日盤高低；換月日用 prevHigh／prevLow
+        if d.get("contract") and prev.get("contract") and d["contract"] != prev["contract"]:
+            ph, pl = d.get("prevHigh"), d.get("prevLow")
+        else:
+            ph, pl = prev.get("high"), prev.get("low")
+        if any(d.get(k) is None for k in ("open", "high", "low")) or ph is None or pl is None:
             skipped += 1
             continue
         considered += 1
-        if not prev["low"] < d["open"] < prev["high"]:
+        if not pl < d["open"] < ph:
             continue
         inside += 1
-        if d["high"] > prev["high"]:
-            ups.append(d["high"] - prev["high"])
-        if d["low"] < prev["low"]:
-            downs.append(prev["low"] - d["low"])
+        if d["high"] > ph:
+            ups.append(d["high"] - ph)
+        if d["low"] < pl:
+            downs.append(pl - d["low"])
 
     def side(xs):
         return {"count": len(xs), "points": [

@@ -247,6 +247,7 @@ def check_official(idx, stats, ticks_by):
         m = front_of(d)
         o = by_date[d][m]
         table.append({"date": d, "contract": m, **o})
+    (REPORT / "official_all.json").write_text(json.dumps({d: by_date[d] for d in sorted(by_date)}, ensure_ascii=False, separators=(",", ":")), "utf-8")
     (REPORT / "official_daily.json").write_text(json.dumps(table, ensure_ascii=False, separators=(",", ":")), "utf-8")
     notes["C"].append(f"已輸出官方日盤近月表 reports/official_daily.json：{len(table)} 天")
 
