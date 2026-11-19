@@ -28,10 +28,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git config user.name futures-replay-bot
+          git config user.email bot@users.noreply.github.com
           cat reports/verify.md >> "$GITHUB_STEP_SUMMARY"
           git add reports
           git diff --cached --quiet && exit 0
-          git -c user.name=futures-replay-bot -c user.email=bot@users.noreply.github.com commit -qm "資料檢查報告 $(TZ=Asia/Taipei date '+%F %H:%M')"
+          git commit -qm "資料檢查報告 $(TZ=Asia/Taipei date '+%F %H:%M')"
           for i in 1 2 3 4 5; do
             if git pull -q --rebase origin main && git push -q origin HEAD:main; then exit 0; fi
             sleep $((i*7))

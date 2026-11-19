@@ -100,8 +100,8 @@ def check_local():
         if d.get("contract") and (d["date"], d["contract"]) in ticks_by:
             t = ticks_by[(d["date"], d["contract"])]
             hi, lo, ht, lt = U.extremes_of(t)
-            exp = [t[0][1], hi, lo, t[-1][1], hi - lo, ht - ht % 60, lt - lt % 60]
-            got = [d["open"], d["high"], d["low"], d["close"], d["amplitude"], d["highTime"], d["lowTime"]]
+            exp = [t[0][1], hi, lo, t[-1][1], hi - lo] + ([ht - ht % 60, lt - lt % 60] if "highTime" in d else [])
+            got = [d["open"], d["high"], d["low"], d["close"], d["amplitude"]] + ([d["highTime"], d["lowTime"]] if "highTime" in d else [])
             if [float(v) for v in exp] != [float(v) for v in got]:
                 bad("A", f"{d['date']} 日線與逐筆不符：檔案 {got}，逐筆 {exp}")
     # 日線本身
@@ -145,7 +145,7 @@ def check_ticks(idx, ticks_by):
                 sec = int(row[3].strip())
                 if 84500 <= sec <= 134500:
                     for leg in row[2].strip().split("/"):
-                        SPREAD_LEGS[(d, leg.strip())] += int(row[5].strip()) // 2
+                        SPREAD_LEGS[(d, leg.strip())] += int(row[5].strip()) // 4  # 實測：價差列數量 ÷4 才是分配到各腳的口數
         SPREAD_CHECKED[d] = True
         mine = {c for (dd, c) in ticks_by if dd == d}
         if set(new) != mine:
