@@ -28,6 +28,9 @@ ROOT = U.ROOT
 REPORT = ROOT / "reports"
 OFFICIAL_URL = "https://www.taifex.com.tw/cht/3/futDataDown"
 
+SPREAD_LEGS: dict = defaultdict(int)
+SPREAD_CHECKED: dict = {}
+ROW_ONLY: list = []
 issues: dict[str, list[str]] = defaultdict(list)
 notes: dict[str, list[str]] = defaultdict(list)
 
@@ -137,6 +140,13 @@ def check_ticks(idx, ticks_by):
             continue
         raw, _ = got
         new = U.parse(d, raw)
+        for row in csv.reader(io.StringIO(raw.decode("cp950"))):
+            if len(row) > 5 and row[1].strip() == "TX" and row[0].strip() == d and "/" in row[2]:
+                sec = int(row[3].strip())
+                if 84500 <= sec <= 134500:
+                    for leg in row[2].strip().split("/"):
+                        SPREAD_LEGS[(d, leg.strip())] += int(row[5].strip()) // 2
+        SPREAD_CHECKED[d] = True
         mine = {c for (dd, c) in ticks_by if dd == d}
         if set(new) != mine:
             bad("B", f"{d} 契約清單不同：網站 {sorted(mine)}，期交所 {sorted(new)}")
@@ -144,9 +154,14 @@ def check_ticks(idx, ticks_by):
             if ticks_by[(d, c)] != new[c]:
                 old = ticks_by[(d, c)]
                 main_same = [t[:3] for t in old] == [t[:3] for t in new[c]]
+                if main_same:
+                    ROW_ONLY.append(f"{d} {c}")
+                    continue
                 bad("B", f"{d} {c} 逐筆不同（網站 {len(old)} 筆／期交所 {len(new[c])} 筆；時間價量{'相同，只有列序不同' if main_same else '不同'}）")
         checked.append(d)
         time.sleep(1)
+    if ROW_ONLY:
+        notes["B"].append(f"{len(ROW_ONLY)} 個檔時間／價／量完全相同，只有「來源列序」編號不同（{ROW_ONLY[0].split()[0]}～{ROW_ONLY[-1].split()[0]}，舊版從 xlsx 轉檔時的列號；只用於事件紀錄顯示，不影響回放與統計）")
     notes["B"].append(f"重抓比對 {len(checked)} 天：{checked[0] if checked else '—'}～{checked[-1] if checked else '—'}")
     if gone:
         notes["B"].append(f"期交所已不提供逐筆、無法重抓的 {len(gone)} 天：{gone[0]}～{gone[-1]}（改用 C 的官方日行情比對）")
@@ -190,17 +205,19 @@ def fetch_official(start: dt.date, end: dt.date):
             if len(row) < len(col) - 1:
                 continue
             g = lambda k: row[col[k]].strip()  # noqa: E731
-            if g("契約") != "TX" or g("交易時段") != "一般":
+            session = g("交易時段")
+            if g("契約") != "TX" or session not in ("一般", "盤後"):
                 continue
             month = g("到期月份(週別)")
             if not (len(month) == 6 and month.isdigit()):
                 continue
             date = g("交易日期").replace("/", "")
-            trading_days.add(date)
+            if session == "一般":
+                trading_days.add(date)
             vals = [g(k) for k in ("開盤價", "最高價", "最低價", "收盤價")]
             if "-" in vals:
                 continue
-            rows[(date, month)] = {"open": float(vals[0]), "high": float(vals[1]), "low": float(vals[2]),
+            rows[(date, month) if session == "一般" else (date, month, "night")] = {"open": float(vals[0]), "high": float(vals[1]), "low": float(vals[2]),
                                    "close": float(vals[3]), "volume": int(g("成交量") or 0)}
         cur = nxt
         time.sleep(1)
@@ -214,8 +231,44 @@ def check_official(idx, stats, ticks_by):
     off, tdays, sample = fetch_official(start, end)
     notes["C"].append(f"官方日行情 {start}～{end}：{len(tdays)} 個交易日、{len(off)} 筆 TX 一般時段單月契約")
     by_date = defaultdict(dict)
-    for (d, m), v in off.items():
-        by_date[d][m] = v
+    night = defaultdict(dict)
+    for k, v in off.items():
+        if len(k) == 2:
+            by_date[k[0]][k[1]] = v
+        else:
+            night[k[0]][k[1]] = v
+    last_day = {}
+    for d in sorted(by_date):
+        for m in by_date[d]:
+            last_day[m] = d
+
+    def front_of(d):
+        ms = sorted(by_date[d])
+        return ms[1] if len(ms) > 1 and last_day.get(ms[0]) == d else ms[0]
+
+    # 官方日盤近月表（結算日改用次月），給重建歷史日線用
+    table = []
+    for d in sorted(by_date):
+        m = front_of(d)
+        o = by_date[d][m]
+        table.append({"date": d, "contract": m, **o})
+    (REPORT / "official_daily.json").write_text(json.dumps(table, ensure_ascii=False, separators=(",", ":")), "utf-8")
+    notes["C"].append(f"已輸出官方日盤近月表 reports/official_daily.json：{len(table)} 天")
+
+    # 假說檢查：舊日線是否＝夜盤＋日盤合併
+    merged_hit = 0
+    for d in daily:
+        if d.get("contract"):
+            continue
+        dd = d["date"]
+        for m in sorted(by_date.get(dd, {}))[:2]:
+            o, n = by_date[dd][m], night.get(dd, {}).get(m)
+            if not n:
+                continue
+            if [n["open"], max(n["high"], o["high"]), min(n["low"], o["low"])] == [d["open"], d["high"], d["low"]]:
+                merged_hit += 1
+                break
+    notes["C"].append(f"舊日線（rule(COW).xls）中，開高低＝同日「夜盤＋日盤」合併的天數：{merged_hit}／{sum(1 for d in daily if not d.get('contract'))}")
     have = {d["date"] for d in daily}
     latest = daily[-1]["date"]
     missing = sorted(d for d in tdays if d not in have and d <= latest)
@@ -269,13 +322,14 @@ def check_official(idx, stats, ticks_by):
         mine = [t[0][1], hi, lo, t[-1][1]]
         vol = sum(x[2] for x in t)
         offv = [o["open"], o["high"], o["low"], o["close"]]
-        if [float(v) for v in mine] != offv or vol != o["volume"]:
-            tick_mism.append(f"{d} {c}：逐筆 開高低收 {mine} 量 {vol}／官方 {offv} 量 {o['volume']}")
+        vol += SPREAD_LEGS.get((d, c), 0)
+        if [float(v) for v in mine] != offv or (SPREAD_CHECKED.get(d) and vol != o["volume"]):
+            tick_mism.append(f"{d} {c}：逐筆 開高低收 {mine} 量(含價差腳) {vol}／官方 {offv} 量 {o['volume']}")
     if tick_mism:
         bad("C", f"逐筆檔與官方日行情不同：{len(tick_mism)} 個")
         notes["C"].extend("  " + s for s in tick_mism[:30])
     else:
-        notes["C"].append(f"{len(ticks_by)} 個逐筆檔的開高低收與成交量，全部與官方日行情相同")
+        notes["C"].append(f"{len(ticks_by)} 個逐筆檔的開高低收全部與官方相同；成交量在可重抓的 {sum(SPREAD_CHECKED.values())} 天，逐筆量＋價差單分配到各月份的量＝官方成交量")
     return {"dailyMismatches": mism, "tickMismatches": tick_mism, "missingDays": missing, "extraDays": extra,
             "officialSample": sample}
 
